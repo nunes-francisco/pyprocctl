@@ -1,0 +1,150 @@
+#!/bin/bash
+# Formatando o nome do processo
+PROCESS_NAME=${0##*/}
+
+if [[ ${PROCESS_NAME} == rc* ]]; then
+    PROCESS_NAME=${PROCESS_NAME:2}
+fi
+
+# Carregando o interpretador do python
+LEGACY=cs_legacy
+PYENV='/root/.pyenv/shims'
+INTERPRETER="${PYENV}/python3"
+PYTHONPATH="${PYTHONPATH}:/usr/local/bin/${LEGACY}/"
+export PYTHONPATH
+
+CONSTANTS=/usr/local/bin/${LEGACY}/cs/conf/constants
+
+# Carregando variáveis de ambiente de desenvolvimento
+if [[ "${ENVIRONMENT}" == "DEV" ]]; then
+    CONSTANTS=/usr/local/bin/${LEGACY}/cs/conf/constants.dev
+fi
+
+while IFS= read -r linha; do
+    # Remover comentários que aparecem após um texto válido (por exemplo, valor1 # comentário)
+    linha=$(echo "$linha" | sed 's/#.*//')
+
+    # Ignorar linhas que estão vazias após a remoção de comentários
+    if [[ -z "$linha" ]] || [[ "$linha" =~ ^\s*$ ]]; then
+        continue
+    fi
+
+    # Processar as variáveis de ambiente
+    export $linha
+    
+done < "${CONSTANTS}"
+
+SERVICE_NAME={{name}}
+STATS=(RUNNING UNUNSED)
+
+RUN_DIR="/var/run/cs/"
+PID_FILE=/var/run/cs/${PROCESS_NAME}.pid
+PATH_BIN="/usr/local/bin/${LEGACY}/cortex/${SERVICE_NAME}"
+
+DEBUG=$(ps aux |grep -v grep |grep debug |awk '{ printf("%s",$31);}' |cut -c 3-)
+
+# Armazenando o pid do processo
+if [ -f $PID_FILE ]; then
+    _PID=$(cat ${PID_FILE} | grep -v grep|awk '{ printf("%s",$1);}')
+fi
+
+get_port(){
+    # Func responsavel por recuperar a porta aberta pelo brain
+    port=$(lsof -P -a -p $@ -i |grep -i LISTEN |awk '{print $9}' |cut -d: -f2 |uniq)
+    echo "$port"
+  }
+
+
+status(){
+     # Objetivo desta função e retornar o status do processo
+     if [ "$_PID" ];then
+         local port=$(get_port $_PID 2> /dev/null)
+         local date_file=$(stat -c %y ${PID_FILE})
+         local date_file=${date_file%%.*}
+        if [ ! ${port} ]; then
+           echo -e "${PROCESS_NAME} is ( active ) since ${date_file} - pid:${_PID} - ${STATS[0]}\n"
+        else
+           echo -e "$PROCESS_NAME is ( active ) since ${date_file}" "pid:${_PID}" "port:${port}" "${STATS[0]}"
+        fi
+          exit 0;
+      else
+          echo -e "${PROCESS_NAME} is ( inactive ) - ${STATS[1]}"
+      fi
+}
+
+parameters(){
+    # Parametros para o processo
+    local http_port={{port}}
+    local params="\
+        --analytics "${CS_TABLE_DATABASE_ADDR}" \
+        --fossil "${CS_FOSSIL_DATABASE_ADDR}" \
+        --config "${CS_CONFIG_DATABASE_ADDR}" \
+        --cardex "${CS_CARDEX_DATABASE_ADDR}" \
+        --cortex "${CS_CORTEX_DATABASE_ADDR}" \
+        --caching "${CS_CACHING_DATABASE_ADDR}" \
+        --session "${CS_SESSION_DATABASE_ADDR}" \
+        --bureau "${CS_BUREAU_DATABASE_ADDR}" \
+        --abacus "${CS_ABACUS_DATABASE_ADDR}" \
+        --broker "${CS_BROKER_ADDR}" \
+        --instance "${PROCESS_NAME}""
+
+    if [[ "${SERVICE_NAME}" =~ ^(brain) ]]; then
+        local params+=" --port "${http_port}""
+    elif [[ "${SERVICE_NAME}" =~ ^(render) ]]; then
+        local params+=" --port "${http_port}" --templatepath "${CS_RENDER_TEMPLATE}""
+#    elif [[ "${SERVICE_NAME}" =~ ^(tasks_chat) ]] || [[ "${PROCESS_NAME}" =~ ^(cstasks_chat-[0-9]) ]]; then
+#        local params+=" --queue_name "${CS_QUEUE_TASKS_CHAT}""
+    elif [[ "${SERVICE_NAME}" =~ ^(task_schedule) ]] || [[ "${PROCESS_NAME}" =~ ^(cstasks_schedule-[0-9]) ]]; then
+        local params+=" --queue_name "${CS_QUEUE_TASKS_SCHEDULE}""
+#    elif [[ "${SERVICE_NAME}" =~ ^(tasks_records) ]] || [[ "${PROCESS_NAME}" =~ ^(cstasks_record-[0-9]) ]]; then
+#        local params+=" --queue_name "${CS_QUEUE_TASKS_RECORDS}""
+    elif [[ "${SERVICE_NAME}" =~ ^(tasks) ]]; then
+        #local params+=" --queue_name "${CS_QUEUE_TASKS}""
+        if [[ "${PROCESS_NAME}" =~ ^(cstasks_chat-[0-9]) ]]; then
+          local params+=" --queue_name "${CS_QUEUE_TASKS_CHAT}""
+        elif [[ "${PROCESS_NAME}" =~ ^(cstasks_record-[0-9]) ]]; then
+          local params+=" --queue_name "${CS_QUEUE_TASKS_RECORDS}""
+        elif [[ "${PROCESS_NAME}" =~ ^(cstasks_routines-[0-9]) ]]; then
+          local params+=" --queue_name "${CS_QUEUE_TASKS_ROUTINES}""
+        else
+          local params+=" --queue_name "${CS_QUEUE_TASKS}""
+        fi
+    else
+        local params=${params}
+    fi
+
+    echo "${params}"
+}
+
+case $1 in
+    start)
+      [ -d "/var/run/cs" ] || mkdir "/var/run/cs/"
+      # echo $$ > $PID_FILE;
+        if [[ ! $_PID ]]; then
+            exec 2>&1 "${INTERPRETER}" "${PATH_BIN}" `parameters` &
+            if [ $? = 0 ] && [ -d "/proc/$!" ]; then
+	            PID="$!"
+                echo "${PID}" > $PID_FILE
+   	        fi
+        else
+            echo "${PROCESS_NAME} is already ${STATS[0]}"
+            exit 1
+        fi
+        ;;
+     stop)
+        if [ -f ${PID_FILE} ]; then
+            kill -9 `cat $PID_FILE`
+            rm $PID_FILE
+        fi
+        ;;
+     status)
+        status
+        ;;
+     restart)
+        $0 stop
+        $0 start
+        ;;
+     *)
+       echo "usage: $0 {start|stop|status|restart}" ;;
+ esac
+ exit 0

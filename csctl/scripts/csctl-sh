@@ -1,0 +1,9 @@
+#!/bin/bash
+# Executa o csctl.py
+#
+SOURCE=/usr/local/bin/csctl/csctl/csctl.py
+PYTHON=python
+
+if [[ -f ${SOURCE} ]]; then
+  "${PYTHON}" "${SOURCE}" "$@"
+fi

@@ -1,0 +1,71 @@
+# Diretórios relacionados
+#/etc/bash_completion.d/ ou /usr/share/bash-completion/completions/
+#
+
+_csctl(){
+  local cur
+  _init_completion || return
+
+  #COMPREPLY=()
+  #cur=${COMP_WORDS[COMP_CWORD]}
+
+  local COMMANDS=(
+        "add"
+        "registry"
+        "remove"
+        "restart"
+        "start"
+        "status"
+        "stop"
+        "show")
+
+    local command i
+    for (( i=0; i < ${#words[@]}-1; i++ )); do
+        if [[ ${COMMANDS[@]} =~ ${words[i]} ]]; then
+            command=${words[i]}
+            break
+        fi
+    done
+
+    # supported options per command
+    if [[ "$cur" == -* ]]; then
+        case $command in
+            add|remove)
+                COMPREPLY=( $( compgen -W '-b --between
+                  -s --single
+                  --help' -- "$cur" ) )
+                return 0
+                ;;
+            registry)
+                COMPREPLY=( $( compgen -W '-a --add
+                  -c --component
+                  -i --instance
+                  -t --type' -- "$cur" ) )
+                return 0
+                ;;
+            satart|stop|status|stop)
+                COMPREPLY=( $( compgen -W '-a --all
+                  -g --group
+                  --help' -- "$cur" ) )
+                return 0
+                ;;
+            show)
+                COMPREPLY=( $( compgen -W '-e --env
+                  -c --conn
+                  -p --params
+                  -r --registry
+                  --help' -- "$cur" ) )
+                return 0
+                ;;
+        esac
+    fi
+
+# no command yet, show what commands we have
+if [ "$command" = "" ]; then
+    COMPREPLY=( $( compgen -W '${COMMANDS[@]}' -- "$cur" ) )
+fi
+
+  return 0
+}
+
+complete -F _csctl -o filenames csctl
